@@ -2,6 +2,9 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import { z } from "zod";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +14,30 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Security Headers
+  app.use(helmet());
+
+  // Rate Limiting for API routes
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests, please try again later." }
+  });
+  app.use("/api/", apiLimiter);
+
+  // Input Validation Schemas
+  const simulateEventSchema = z.object({
+    platform: z.enum(["discord", "github", "reddit", "stackoverflow"]),
+    user: z.string().min(1),
+    content: z.string().min(1),
+  });
+
+  const draftPrSchema = z.object({
+    id: z.string().min(1),
+  });
 
   // Mock database
   const state: any = {
@@ -79,27 +106,43 @@ async function startServer() {
   });
 
   app.post("/api/simulate-event", (req, res) => {
-    const { platform, user, content } = req.body;
-    const newEvent = {
-        id: Math.random().toString(36).substr(2, 9),
-        platform,
-        user,
-        content,
-        status: "pending",
-        timestamp: new Date().toISOString(),
-    };
-    state.questions.unshift(newEvent);
-    res.json(newEvent);
+    try {
+      const validatedData = simulateEventSchema.parse(req.body);
+      const newEvent = {
+          id: Math.random().toString(36).substr(2, 9),
+          platform: validatedData.platform,
+          user: validatedData.user,
+          content: validatedData.content,
+          status: "pending",
+          timestamp: new Date().toISOString(),
+      };
+      state.questions.unshift(newEvent);
+      res.json(newEvent);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid request data", details: (error as any).errors });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
+    }
   });
 
   app.post("/api/draft-pr", (req, res) => {
-    const { id } = req.body;
-    const question = state.questions.find(q => q.id === id) as any;
-    if (question) {
-      question.pr_drafted = true;
-      res.json({ success: true, question });
-    } else {
-      res.status(404).json({ error: "Question not found" });
+    try {
+      const validatedData = draftPrSchema.parse(req.body);
+      const question = state.questions.find((q: any) => q.id === validatedData.id) as any;
+      if (question) {
+        question.pr_drafted = true;
+        res.json({ success: true, question });
+      } else {
+        res.status(404).json({ error: "Question not found" });
+      }
+    } catch (error) {
+       if (error instanceof z.ZodError) {
+        res.status(400).json({ error: "Invalid request data", details: (error as any).errors });
+      } else {
+        res.status(500).json({ error: "Internal server error" });
+      }
     }
   });
 

@@ -12,6 +12,7 @@ interface State {
 }
 
 class ErrorBoundary extends React.Component<Props, State> {
+  public state: State;
   constructor(props: Props) {
     super(props);
     this.state = {
@@ -30,7 +31,7 @@ class ErrorBoundary extends React.Component<Props, State> {
 
   public render() {
     // Escape hatch for strict TS environments where this.props/state are not recognized on class
-    const state = (this as any).state as State;
+    const state = this.state;
     const props = (this as any).props as Props;
 
     if (state.hasError) {
